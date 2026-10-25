@@ -1,0 +1,16 @@
+id: pushup
+name: Push-up
+view: side
+description: Place the camera at hip height, side-on, with your full body visible.
+target_reps: 10
+target_hold_seconds: 0
+metric: elbow_angle
+extended: 155
+contracted: 125
+depth_target: 95
+min_rep_seconds: 0.7
+required_joints: [shoulder, elbow, wrist, hip, ankle]
+rules:
+  - {feature: body_angle, operator: min, threshold: 155, flag: body_alignment, cue: Keep shoulders hips and ankles in one line, severity: 3}
+ladder: [Wall push-up, Incline push-up, Standard push-up, Archer push-up]
+limitations: [Side view cannot assess elbow flare, Shoulder depth is a proxy rather than chest-to-floor distance]

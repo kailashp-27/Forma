@@ -1,0 +1,16 @@
+id: squat
+name: Squat
+view: side
+description: Stand side-on with shoulders, hips, knees and ankles visible.
+target_reps: 10
+target_hold_seconds: 0
+metric: knee_angle
+extended: 160
+contracted: 125
+depth_target: 100
+min_rep_seconds: 0.7
+required_joints: [shoulder, hip, knee, ankle]
+rules:
+  - {feature: torso_lean, operator: max, threshold: 55, flag: torso_lean, cue: Keep your chest lifted, severity: 2}
+ladder: [Supported squat, Bodyweight squat, Split squat, Assisted pistol squat]
+limitations: [Side view cannot assess knee valgus, Depth is a two-dimensional angle estimate]

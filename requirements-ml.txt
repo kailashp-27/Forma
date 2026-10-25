@@ -1,0 +1,7 @@
+-r requirements.txt
+torch>=2.5,<3
+onnx>=1.17,<2
+skl2onnx>=1.18,<2
+
+# Protobuf 7 rejects boolean integer attributes emitted by skl2onnx tree conversion.
+protobuf>=6.31.1,<7

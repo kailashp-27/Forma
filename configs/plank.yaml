@@ -1,0 +1,15 @@
+id: plank
+name: Plank
+view: side
+description: Hold a side-on plank with shoulders, hips and ankles unobstructed.
+target_reps: 0
+target_hold_seconds: 30
+metric: body_angle
+extended: 165
+contracted: 150
+min_rep_seconds: 0
+required_joints: [shoulder, hip, ankle]
+rules:
+  - {feature: body_angle, operator: min, threshold: 165, flag: body_alignment, cue: Bring hips into line with shoulders and ankles, severity: 3}
+ladder: [Incline plank, Knee plank, Forearm plank, Long lever plank]
+limitations: [Timer counts only visible aligned posture, Two-dimensional pose cannot assess spinal loading]

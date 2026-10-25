@@ -1,0 +1,16 @@
+id: pullup
+name: Pull-up
+view: side
+description: Side view with wrists, elbows, shoulders and hips visible throughout the rep.
+target_reps: 5
+target_hold_seconds: 0
+metric: elbow_angle
+extended: 155
+contracted: 95
+depth_target: 65
+min_rep_seconds: 0.8
+required_joints: [shoulder, elbow, wrist, hip]
+rules:
+  - {feature: torso_lean, operator: max, threshold: 30, flag: torso_swing, cue: Reduce body swing and move with control, severity: 2}
+ladder: [Scapular pull-up, Assisted pull-up, Negative pull-up, Strict pull-up]
+limitations: [Experimental because the bar can occlude joints, Chin-over-bar requires bar calibration and is not scored, Torso lean is only a proxy for kipping]

@@ -1,0 +1,57 @@
+import {useCallback,useEffect,useRef,useState} from 'react';
+import {api,type ExerciseId,type Frame,type Health} from './types';
+import {lightingLevel} from './setupChecks';
+import {CameraMeasurements,type CameraRun} from './performance';
+const freshFrame:Frame={type:'frame',reps:0,hold_seconds:0,state:'ready',quality:null};
+const delay=(milliseconds:number)=>new Promise(resolve=>setTimeout(resolve,milliseconds));
+export function useCoach(exercise:ExerciseId,onFinish:()=>void,participantId:string,variation:string){
+ const video=useRef<HTMLVideoElement>(null),stream=useRef<MediaStream|null>(null),socket=useRef<WebSocket|null>(null),timer=useRef<ReturnType<typeof setInterval>|null>(null),sessionId=useRef<number|string|null>(null),waiting=useRef(false),waitingSince=useRef(0),voiceRef=useRef(false),lastSpoken=useRef(0),busyRef=useRef(false),generation=useRef(0),mounted=useRef(true),finishing=useRef<Promise<void>|null>(null),onFinishRef=useRef(onFinish);
+ const [mode,setMode]=useState<'idle'|'live'|'demo'|'setup'>('idle'),[busy,setBusy]=useState(false),[error,setError]=useState(''),[frame,setFrame]=useState<Frame>(freshFrame),[elapsed,setElapsed]=useState(0),[voice,setVoice]=useState(false);
+ voiceRef.current=voice;onFinishRef.current=onFinish;
+ const [brightness,setBrightness]=useState<number|null>(null);
+ const measurements=useRef(new CameraMeasurements()),runRef=useRef<CameraRun|null>(null);
+ const [cameraRun,setCameraRun]=useState<CameraRun|null>(null);
+ const stopAck=useRef<(()=>void)|null>(null),startAck=useRef<{resolve:()=>void;reject:(error:Error)=>void}|null>(null);
+ const cleanup=useCallback(()=>{if(timer.current)clearInterval(timer.current);timer.current=null;const ws=socket.current;socket.current=null;ws?.close();stream.current?.getTracks().forEach(t=>t.stop());stream.current=null;if(video.current)video.current.srcObject=null;waiting.current=false;if('speechSynthesis' in window)speechSynthesis.cancel();},[]);
+ const finalize=useCallback(async()=>{const id=sessionId.current;if(id===null)return;let failure:unknown;for(let attempt=0;attempt<4;attempt++){try{await api(`/sessions/${id}/finish`,{method:'POST'});if(sessionId.current===id)sessionId.current=null;onFinishRef.current();return}catch(e){failure=e;if(attempt<3)await delay(250*(attempt+1))}}throw new Error(`Session stopped, but finalization failed. Its saved reps remain available. ${String(failure)}`)},[]);
+ const stop=useCallback(async(reason?:string)=>{if(finishing.current)return finishing.current;busyRef.current=true;if(mounted.current)setBusy(true);const task=(async()=>{const ws=socket.current;stream.current?.getTracks().forEach(track=>track.stop());stream.current=null;if(video.current)video.current.srcObject=null;if(timer.current){clearInterval(timer.current);timer.current=null}if(ws?.readyState===WebSocket.OPEN){await new Promise<void>(resolve=>{const timeout=setTimeout(()=>{stopAck.current=null;resolve()},4000);stopAck.current=()=>{clearTimeout(timeout);stopAck.current=null;resolve()};try{ws.send(JSON.stringify({type:'stop'}))}catch{stopAck.current?.()}})}if(runRef.current&&!runRef.current.ended_at){runRef.current={...runRef.current,ended_at:new Date().toISOString(),performance:measurements.current.snapshot(performance.now())};if(mounted.current)setCameraRun(runRef.current)}cleanup();if(mounted.current){setMode('idle');if(reason)setError(reason)}try{await finalize()}catch(e){if(mounted.current)setError(`${reason?reason+' ':''}${String(e)}`)}finally{busyRef.current=false;if(mounted.current)setBusy(false)}})();finishing.current=task;try{await task}finally{finishing.current=null}},[cleanup,finalize]);
+ useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;startAck.current?.reject(new Error('Coach closed.'));stopAck.current?.();cleanup();void finalize().catch(()=>{})}},[cleanup,finalize]);
+ useEffect(()=>{if(mode==='idle')return;const t=setInterval(()=>setElapsed(n=>n+1),1000);return()=>clearInterval(t)},[mode]);
+ useEffect(()=>{if(!voice&&'speechSynthesis' in window)speechSynthesis.cancel()},[voice]);
+ const start=async(demo=false,setup=false,selection?:{exercise:ExerciseId;variation:string})=>{
+  const activeExercise=selection?.exercise??exercise,activeVariation=selection?.variation??variation;
+  if(busyRef.current||socket.current||stream.current)return false;busyRef.current=true;setBusy(true);setError('');setElapsed(0);setFrame(freshFrame);setBrightness(null);const attempt=++generation.current;
+  const checkCurrent=()=>{if(attempt!==generation.current||!mounted.current)throw new Error('Camera startup was canceled.')};
+  try{
+   await finalize();checkCurrent();
+   if(!demo){
+   if(!setup){runRef.current=null;setCameraRun(null);measurements.current=new CameraMeasurements()}
+   const health=await api<Health>('/health');checkCurrent();
+   if(health.training_active)throw new Error('A training experiment is running. Wait for it to finish or cancel it in Model Lab before using the camera.');
+   if(!health.ultralytics_installed)throw new Error('Pose analysis is not installed. Run .\\scripts\\setup.ps1 before using the camera. Preview still works.');
+   if(!health.model_weights_present&&!health.pose_model_loaded)throw new Error('Pose model weights are missing. Run .\\.venv\\Scripts\\python.exe scripts/download_model.py before using the camera. Preview still works.');
+   if(!navigator.mediaDevices?.getUserMedia)throw new Error('Camera access needs localhost or HTTPS and a supported browser.');
+   const acquired=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:960},height:{ideal:540},facingMode:'user'},audio:false});
+   if(attempt!==generation.current||!mounted.current){acquired.getTracks().forEach(t=>t.stop());throw new Error('Camera startup was canceled.')}
+   stream.current=acquired;
+   if(video.current){video.current.srcObject=acquired;await video.current.play()}checkCurrent();
+   if(!setup){const session=await api<{id:number|string}>('/sessions',{method:'POST',body:JSON.stringify({exercise:activeExercise,participant_id:participantId.trim()||'local-user',variation:activeVariation,view:'side'})});sessionId.current=session.id;checkCurrent();
+   runRef.current={session_id:session.id,exercise:activeExercise,participant_id:participantId.trim()||'local-user',variation:activeVariation,started_at:new Date().toISOString(),reps:0,hold_seconds:0,performance:measurements.current.snapshot(performance.now())};}
+   }
+   const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws/coach`);socket.current=ws;
+   const started=new Promise<void>((resolve,reject)=>{const timeout=setTimeout(()=>{startAck.current=null;reject(new Error('Coach did not accept the session within 15 seconds.'))},15000);startAck.current={resolve:()=>{clearTimeout(timeout);startAck.current=null;resolve()},reject:e=>{clearTimeout(timeout);startAck.current=null;reject(e)}}});
+   ws.onmessage=e=>{if(socket.current!==ws)return;try{const result=JSON.parse(e.data) as Frame;if(result.type==='started'){startAck.current?.resolve();return}if(result.type==='stopped'){stopAck.current?.();return}if(result.type==='error'||result.error){const description=result.error||result.message||'Pose analysis failed.';if(startAck.current)startAck.current.reject(new Error(description));else void stop(`${description} Camera stopped.`);return}if(result.type!=='frame')return;if(!demo&&!setup&&waiting.current&&runRef.current){const now=performance.now();measurements.current.add(result,waitingSince.current,now);runRef.current={...runRef.current,reps:result.reps??runRef.current.reps,hold_seconds:result.hold_seconds??runRef.current.hold_seconds,performance:measurements.current.snapshot(now)};if(mounted.current)setCameraRun(runRef.current)}waiting.current=false;waitingSince.current=0;if(!mounted.current)return;setFrame(result);if(!setup&&voiceRef.current&&'speechSynthesis' in window&&result.cue&&(result.rep_completed||(activeExercise==='plank'&&Date.now()-lastSpoken.current>15000))){lastSpoken.current=Date.now();speechSynthesis.cancel();speechSynthesis.speak(new SpeechSynthesisUtterance(result.cue))}}catch{if(startAck.current)startAck.current.reject(new Error('Unreadable coach response.'));else void stop('Unreadable coach response. Camera stopped.')}};
+   ws.onopen=()=>{if(socket.current!==ws)return;try{ws.send(JSON.stringify(demo?{type:'demo',exercise:activeExercise}:setup?{type:'setup',exercise:activeExercise}:{type:'start',exercise:activeExercise,session_id:sessionId.current}))}catch{startAck.current?.reject(new Error('Could not start the coaching session.'))}};
+   ws.onerror=()=>{if(socket.current!==ws)return;if(startAck.current)startAck.current.reject(new Error('Could not connect to the local coach. Start the backend first.'));else if(socket.current===ws)void stop('Coach connection failed. Camera stopped.')};
+   ws.onclose=()=>{if(socket.current!==ws)return;stopAck.current?.();if(startAck.current)startAck.current.reject(new Error('Coach disconnected before the session started.'));else if(socket.current===ws&&!finishing.current)void stop('Coach disconnected. Your camera has been stopped.')};
+   await started;checkCurrent();if(!demo&&!setup)measurements.current.start(performance.now());
+   if(demo){timer.current=setInterval(()=>{if(waiting.current){if(performance.now()-waitingSince.current>10000)void stop('Synthetic engine preview timed out.');return}if(ws.readyState===WebSocket.OPEN){waiting.current=true;waitingSince.current=performance.now();ws.send(JSON.stringify({type:'tick'}))}},40);setMode('demo');return true}
+   let lastLightCheck=0;const capture=document.createElement('canvas'),ctx=capture.getContext('2d');if(!ctx)throw new Error('This browser could not prepare camera frames.');
+   timer.current=setInterval(()=>{const source=video.current;if(waiting.current){if(performance.now()-waitingSince.current>30000)void stop('Pose analysis timed out after 30 seconds. Camera stopped; restart when the local engine is ready.');return}if(ws.readyState!==WebSocket.OPEN||!source||source.readyState<2||!source.videoWidth||!source.videoHeight)return;const width=Math.min(640,source.videoWidth),height=Math.round(width*source.videoHeight/source.videoWidth);if(capture.width!==width||capture.height!==height){capture.width=width;capture.height=height}ctx.drawImage(source,0,0,width,height);if(setup&&performance.now()-lastLightCheck>1000){lastLightCheck=performance.now();try{setBrightness(lightingLevel(ctx.getImageData(0,0,width,height).data))}catch{setBrightness(null)}}waiting.current=true;waitingSince.current=performance.now();capture.toBlob(blob=>{if(blob&&socket.current===ws&&ws.readyState===WebSocket.OPEN){try{ws.send(blob)}catch{void stop('Could not send the camera frame. Camera stopped.')}}else{waiting.current=false;waitingSince.current=0}},'image/jpeg',.75)},40);
+   setMode(setup?'setup':'live');return true;
+  }catch(e){cleanup();if(mounted.current){if(demo){setMode('demo');setFrame({...freshFrame,cue:'Offline animation only — no engine metrics or assessment.'});setError('The local engine is unavailable. This preview is an illustration; no reps or form scores are computed.')}else{setMode('idle');setError(e instanceof Error?e.message:String(e))}}try{await finalize()}catch(finalError){if(mounted.current)setError(`${String(e)} ${String(finalError)}`)}}
+  finally{busyRef.current=false;if(mounted.current)setBusy(false)}
+  return false;
+ };
+ return {brightness,cameraRun,video,frame,mode,busy,error,setError,elapsed,voice,setVoice,start,stop,sessionId};
+}
