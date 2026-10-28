@@ -117,3 +117,11 @@ models/           Downloaded pose weights (excluded from source packages)
 ```
 
 YOLO11 documentation: https://docs.ultralytics.com/models/yolo11/ . Ultralytics code and weights use AGPL-3.0 or an Enterprise license; review their terms before distributing or commercializing a derived application: https://www.ultralytics.com/license .
+
+## Startup troubleshooting
+
+Run these commands from the project root:
+
+- **Missing dashboard build:** run `cd frontend`, `npm.cmd ci`, and `npm.cmd run build`, then `cd ..` before starting Forma again.
+- **Missing dependencies or pose weights:** run `.\.venv\Scripts\python.exe scripts\doctor.py` to list missing packages and artifacts. Add `--deep` to also check that installed native dependencies import successfully. Run `.\scripts\setup.ps1` to repair the environment. If you intentionally used `-SkipPose`, missing pose dependencies and weights are expected.
+- **Port 8765 already in use:** stop the previous Forma server with **Ctrl+C** in its launcher window, or start on another port with `.\scripts\start.ps1 -Port 8787` and open **http://127.0.0.1:8787**.
